@@ -31,6 +31,8 @@ Capture video;                    // Camera stream
 OpenCV opencv;                    // OpenCV
 PImage now, diff;                 // PImage variables to store the current image and the difference between two images 
 
+PGraphics drawing;                // PGraphics buffer
+
 ArrayList<Contour> contours;      // ArrayList to hold all detected contours
 ArrayList<Blob> blobs = new ArrayList <Blob>(); // ArrayList to hold all blobs
 
@@ -43,7 +45,12 @@ int pacManBlobID = 0;             //  Initial blob that holds PacMan image
 
 int ContourThreshold = 20;        //  Contour detection sensitivity of the script
 int SizeThreshold = 100;          //  Contour size threshold
-int MovementMargin = 25;          //  Max difference in coordinates
+int MovementMargin = 40;          //  Max difference in coordinates
+int segmentSize = 10;
+int segmentThreshold = segmentSize * segmentSize / 3;
+
+/* Slider Bar */
+HScrollbar hs1, hs2;
 
 /* Define a Blob class */
 class Blob {
@@ -131,6 +138,10 @@ void setup() {
   textFont(font, 12);                     //  Set font size
   strokeWeight(3);                        //  Set stroke size
   
+  noStroke();
+  hs1 = new HScrollbar(0, height/2-8, width, 16, 16);
+  hs2 = new HScrollbar(0, height/2+8, width, 16, 16);
+  
   // Add dots to the dots ArrayList
   for(int i = 1; i < 15; i++) { 
     for(int j = 1; j < 12; j++) {
@@ -142,18 +153,49 @@ void setup() {
 /* Draw function */
 void draw() { 
   
+  // start buffer
+  drawing = createGraphics(640, 480);
+  drawing.beginDraw();
+  drawing.noStroke();
+  int[] segments = new int[int(width/segmentSize)*int((height/2)/segmentSize)];  //  Set number segments
+  
   opencv.loadImage(video);   //  Capture video from camera in OpenCV
   
   image(video, 0, 0);        //  Draw camera image to screen 
   
   opencv.gray();             //  Convert into gray scale
-  opencv.contrast(2);        //  Increase contrast
+  //opencv.contrast(2);        //  Increase contrast
   opencv.invert();           //  Invert b/w
-  opencv.blur(3);            //  Reduce camera noise
+  //opencv.blur(3);            //  Reduce camera noise
   opencv.threshold(ContourThreshold);  //  Convert to Black and White
+  //opencv.flip(OpenCV.VERTICAL); // Flip image vertical
   
   now = opencv.getOutput();   //  Store image in PImage
   image(now, 0, 480);         //  Show video
+
+  // Analyze image
+  int segmentCounter = 0;
+  for( int x = 1; x < width; x = x + segmentSize) {
+    for ( int y = 1; y < (height/2); y = y + segmentSize) {
+      
+      int segmentBrightness = 0;
+      for ( int i = 0; i < segmentSize; i++) {
+        for ( int j = 0; j < segmentSize; j++) {
+          if (brightness(now.pixels[x+i+(y*width)+j]) > 127) {
+            segmentBrightness++;
+          }
+        }
+      }
+      if(segmentBrightness > segmentThreshold) { //  segment is bright
+        segments[segmentCounter] = 1;
+        drawing.fill(255,255,255);
+        drawing.rect(x-1,y-1,12,12);
+      }
+      segmentCounter++;
+    }  
+  }
+
+  drawing.endDraw();
   
   // Draw all dots
   for( int i = 0; i < dots.size(); i++) {   //  Loop through all dots
@@ -169,6 +211,11 @@ void draw() {
       _dot = null;                          //  Makes the temporary dot object null.
     }
   }
+  
+  // Draw the offscreen buffer to the screen with image() 
+  image(drawing, 0, 0);
+  
+  opencv.loadImage(drawing);
   
   // Analyze video
   contours = opencv.findContours();         //  Find contours
@@ -204,8 +251,8 @@ void draw() {
       noFill();           //  Disable filled shapes
       stroke(0, 255, 0);  //  Set stroke color to green
       contour.draw();     //  Draw the contour
-      fill(255, 0, 0);    //  Set color to red
-      text((sumx/sections) + ", " + (sumy/sections), (sumx/sections), (sumy/sections)); // Print the coordinates on screen
+      //fill(255, 0, 0);    //  Set color to red
+      //text((sumx/sections) + ", " + (sumy/sections), (sumx/sections), (sumy/sections)); // Print the coordinates on screen
     
       if(blobs.size() > 0) {  //  Check whether this is the first blob or not
         boolean withinmargin = false;    //  Flag whether it is close to a previous blob
@@ -259,9 +306,22 @@ void draw() {
   }
 
   // Print the score
-  fill(0,0,0);  // Set color to black
+  fill(0,255,0);  // Set color to green
   textSize(20); // Increase text size
   text("Score: " + score, 20, 20);   // Display score
+  
+  ContourThreshold = int(hs1.getPos()); // get scrollbar position
+  fill(0,255,0);  // Set color to green
+  textSize(20); // Increase text size
+  text("CountourThreshold: " + ContourThreshold, 20, 40);
+  
+  SizeThreshold = int(hs2.getPos());
+  text("SizeThreshold: " + SizeThreshold * 10, 30, 60);
+  
+  hs1.update();
+  hs2.update();
+  hs1.display();
+  hs2.display();
   
   // Wait a little before the next round to save processing power and memory
   delay(20);
@@ -288,5 +348,82 @@ void mouseClicked() {
       }
     }
     _blob = null; //  Reset
+  }
+}
+
+/* Scrollbar class */
+class HScrollbar {
+  int swidth, sheight;    // width and height of bar
+  float xpos, ypos;       // x and y position of bar
+  float spos, newspos;    // x position of slider
+  float sposMin, sposMax; // max and min values of slider
+  int loose;              // how loose/heavy
+  boolean over;           // is the mouse over the slider?
+  boolean locked;
+  float ratio;
+
+  HScrollbar (float xp, float yp, int sw, int sh, int l) {
+    swidth = sw;
+    sheight = sh;
+    int widthtoheight = sw - sh;
+    ratio = (float)sw / (float)widthtoheight;
+    xpos = xp;
+    ypos = yp-sheight/2;
+    spos = xpos + swidth/2 - sheight/2;
+    newspos = spos;
+    sposMin = xpos;
+    sposMax = xpos + swidth - sheight;
+    loose = l;
+  }
+
+  void update() {
+    if (overEvent()) {
+      over = true;
+    } else {
+      over = false;
+    }
+    if (mousePressed && over) {
+      locked = true;
+    }
+    if (!mousePressed) {
+      locked = false;
+    }
+    if (locked) {
+      newspos = constrain(mouseX-sheight/2, sposMin, sposMax);
+    }
+    if (abs(newspos - spos) > 1) {
+      spos = spos + (newspos-spos)/loose;
+    }
+  }
+
+  float constrain(float val, float minv, float maxv) {
+    return min(max(val, minv), maxv);
+  }
+
+  boolean overEvent() {
+    if (mouseX > xpos && mouseX < xpos+swidth &&
+       mouseY > ypos && mouseY < ypos+sheight) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  void display() {
+    noStroke();
+    fill(204);
+    rect(xpos, ypos, swidth, sheight);
+    if (over || locked) {
+      fill(0, 0, 0);
+    } else {
+      fill(102, 102, 102);
+    }
+    rect(spos, ypos, sheight, sheight);
+  }
+
+  float getPos() {
+    // Convert spos to be values between
+    // 0 and the total width of the scrollbar
+    return spos * ratio;
   }
 }
